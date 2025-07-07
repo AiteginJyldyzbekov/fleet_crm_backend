@@ -1,0 +1,221 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
+// Основная модель компании (tenant)
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  phone     String?
+  address   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Связи
+  users        User[]
+  drivers      Driver[]
+  vehicles     Vehicle[]
+  contracts    Contract[]
+  payments     Payment[]
+  subscription Subscription?
+
+  @@map("companies")
+}
+
+// Модель пользователей системы
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  firstName String
+  lastName  String
+  phone     String?
+  role      UserRole
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Multi-tenant связь
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Связи
+  createdPayments Payment[] @relation("PaymentCreatedBy")
+
+  @@map("users")
+}
+
+// Модель водителей
+model Driver {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  password     String
+  firstName    String
+  lastName     String
+  phone        String
+  licenseNumber String  @unique
+  balance      Decimal  @default(0) @db.Decimal(10, 2)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Multi-tenant связь
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Связи
+  contracts Contract[]
+  payments  Payment[]
+
+  @@map("drivers")
+}
+
+// Модель транспортных средств
+model Vehicle {
+  id           String        @id @default(cuid())
+  brand        String
+  model        String
+  year         Int
+  plateNumber  String
+  vin          String        @unique
+  color        String?
+  status       VehicleStatus @default(AVAILABLE)
+  dailyRate    Decimal       @db.Decimal(8, 2)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  // Multi-tenant связь
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Связи
+  contracts Contract[]
+
+  @@unique([plateNumber, companyId])
+  @@map("vehicles")
+}
+
+// Модель контрактов (связь водитель-автомобиль)
+model Contract {
+  id          String         @id @default(cuid())
+  dailyRate   Decimal        @db.Decimal(8, 2)
+  deposit     Decimal        @default(0) @db.Decimal(10, 2)
+  startDate   DateTime
+  endDate     DateTime?
+  status      ContractStatus @default(ACTIVE)
+  description String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  // Multi-tenant связь
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Связи
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  payments Payment[]
+
+  @@unique([driverId, vehicleId, startDate])
+  @@map("contracts")
+}
+
+// Модель платежей
+model Payment {
+  id          String      @id @default(cuid())
+  amount      Decimal     @db.Decimal(10, 2)
+  type        PaymentType
+  description String?
+  date        DateTime    @default(now())
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Multi-tenant связь
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Связи
+  driverId String
+  driver   Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  contractId String?
+  contract   Contract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+
+  createdById String?
+  createdBy   User?   @relation("PaymentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@map("payments")
+}
+
+// Модель подписки (для Phase 2)
+model Subscription {
+  id        String           @id @default(cuid())
+  plan      SubscriptionPlan
+  status    SubscriptionStatus @default(ACTIVE)
+  startDate DateTime
+  endDate   DateTime?
+  price     Decimal          @db.Decimal(8, 2)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  // Связь с компанией (один к одному)
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+// Энумы
+enum UserRole {
+  SUPER_ADMIN
+  COMPANY_ADMIN
+  COMPANY_MANAGER
+  DRIVER
+}
+
+enum VehicleStatus {
+  AVAILABLE
+  RENTED
+  MAINTENANCE
+  INACTIVE
+}
+
+enum ContractStatus {
+  ACTIVE
+  COMPLETED
+  TERMINATED
+  SUSPENDED
+}
+
+enum PaymentType {
+  PAYMENT      // Пополнение баланса
+  FINE         // Штраф
+  BONUS        // Бонус
+  DAILY_RENT   // Ежедневная аренда
+  DEPOSIT      // Депозит
+  REFUND       // Возврат
+}
+
+enum SubscriptionPlan {
+  BASIC
+  PREMIUM
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
