@@ -1,3 +1,4 @@
+// src/auth/auth.controller.ts
 import { Controller, Post, Body, Get, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -25,12 +26,24 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Get('profile')
   getProfile(@User() user: CurrentUser) {
-    return this.authService.getProfile(user.id);
+    return this.authService.getProfile(user.id, user.userType);
   }
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
   getCurrentUser(@User() user: CurrentUser) {
     return user;
+  }
+
+  // Дополнительный endpoint для проверки типа пользователя
+  @UseGuards(JwtAuthGuard)
+  @Get('user-type')
+  getUserType(@User() user: CurrentUser) {
+    return {
+      userType: user.userType,
+      role: user.role,
+      hasCompany: !!user.companyId,
+      isDriver: user.userType === 'driver',
+    };
   }
 }

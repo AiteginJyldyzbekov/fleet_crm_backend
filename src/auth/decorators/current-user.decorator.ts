@@ -1,3 +1,4 @@
+// src/auth/decorators/current-user.decorator.ts
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 
 export interface CurrentUser {
@@ -8,6 +9,8 @@ export interface CurrentUser {
   role: string;
   companyId?: string;
   company?: any;
+  userType?: 'user' | 'driver';
+  balance?: number; // Для водителей
 }
 
 export const User = createParamDecorator(

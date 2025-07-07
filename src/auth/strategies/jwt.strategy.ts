@@ -1,3 +1,4 @@
+// src/auth/strategies/jwt.strategy.ts
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PassportStrategy } from '@nestjs/passport';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
@@ -5,10 +6,11 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export interface JwtPayload {
-  sub: string; // user ID
+  sub: string; // user/driver ID
   email: string;
   role: string;
   companyId?: string;
+  userType: 'user' | 'driver'; // Новое поле
 }
 
 @Injectable()
@@ -31,6 +33,35 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload) {
+    // Проверяем, что payload содержит необходимые данные
+    if (!payload.sub) {
+      throw new UnauthorizedException('Invalid token payload');
+    }
+
+    if (payload.userType === 'driver') {
+      const driver = await this.prisma.driver.findUnique({
+        where: { id: payload.sub },
+        include: { company: true },
+      });
+
+      if (!driver || !driver.isActive) {
+        throw new UnauthorizedException('Driver not found or inactive');
+      }
+
+      return {
+        id: driver.id,
+        email: driver.email,
+        firstName: driver.firstName,
+        lastName: driver.lastName,
+        role: 'DRIVER',
+        companyId: driver.companyId,
+        company: driver.company,
+        userType: 'driver',
+        balance: driver.balance, // Добавляем баланс для водителей
+      };
+    }
+
+    // Существующий код для User
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       include: { company: true },
@@ -48,6 +79,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       role: user.role,
       companyId: user.companyId,
       company: user.company,
+      userType: 'user',
     };
   }
 }

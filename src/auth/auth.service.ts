@@ -1,3 +1,4 @@
+// src/auth/auth.service.ts - ОБНОВЛЕННАЯ ВЕРСИЯ
 import { Injectable, UnauthorizedException, ConflictException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
@@ -16,12 +17,13 @@ export class AuthService {
   async register(registerDto: RegisterDto) {
     const { email, password, firstName, lastName, phone, role, companyId } = registerDto;
 
-    // Проверяем, существует ли пользователь
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email },
-    });
+    // Проверяем, существует ли пользователь в любой из таблиц
+    const [existingUser, existingDriver] = await Promise.all([
+      this.prisma.user.findUnique({ where: { email } }),
+      this.prisma.driver.findUnique({ where: { email } }),
+    ]);
 
-    if (existingUser) {
+    if (existingUser || existingDriver) {
       throw new ConflictException('User with this email already exists');
     }
 
@@ -54,100 +56,190 @@ export class AuthService {
     const saltRounds = 12;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-    // Создаем пользователя
-    const user = await this.prisma.user.create({
-      data: {
-        email,
-        password: hashedPassword,
-        firstName,
-        lastName,
-        phone,
-        role,
-        companyId,
-      },
-      include: {
-        company: true,
-      },
-    });
+    // Создаем пользователя (только для ролей кроме DRIVER)
+    if (role !== UserRole.DRIVER) {
+      const user = await this.prisma.user.create({
+        data: {
+          email,
+          password: hashedPassword,
+          firstName,
+          lastName,
+          phone,
+          role,
+          companyId,
+        },
+        include: {
+          company: true,
+        },
+      });
 
-    // Удаляем пароль из ответа
-    const { password: _, ...userWithoutPassword } = user;
+      const { password: _, ...userWithoutPassword } = user;
+      const token = await this.generateToken({
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        companyId: user.companyId,
+        userType: 'user',
+      });
 
-    // Генерируем JWT токен
-    const token = await this.generateToken(user);
-
-    return {
-      user: userWithoutPassword,
-      token,
-    };
+      return {
+        user: userWithoutPassword,
+        token,
+        userType: 'user',
+      };
+    } else {
+      throw new BadRequestException('Drivers should be created through the Driver API');
+    }
   }
 
   async login(loginDto: LoginDto) {
     const { email, password } = loginDto;
 
-    // Находим пользователя
+    // Сначала ищем в таблице User
     const user = await this.prisma.user.findUnique({
       where: { email },
       include: { company: true },
     });
 
-    if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+    if (user) {
+      return this.handleUserLogin(user, password);
     }
 
+    // Если не найден в User, ищем в таблице Driver
+    const driver = await this.prisma.driver.findUnique({
+      where: { email },
+      include: { company: true },
+    });
+
+    if (driver) {
+      return this.handleDriverLogin(driver, password);
+    }
+
+    throw new UnauthorizedException('Invalid credentials');
+  }
+
+  private async handleUserLogin(user: any, password: string) {
     if (!user.isActive) {
       throw new UnauthorizedException('Account is deactivated');
     }
 
-    // Проверяем пароль
     const isPasswordValid = await bcrypt.compare(password, user.password);
-
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Проверяем, активна ли компания (если пользователь принадлежит компании)
     if (user.company && !user.company.isActive) {
       throw new UnauthorizedException('Company is deactivated');
     }
 
-    // Удаляем пароль из ответа
     const { password: _, ...userWithoutPassword } = user;
-
-    // Генерируем JWT токен
-    const token = await this.generateToken(user);
+    const token = await this.generateToken({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      companyId: user.companyId,
+      userType: 'user',
+    });
 
     return {
       user: userWithoutPassword,
       token,
+      userType: 'user',
+    };
+  }
+
+  private async handleDriverLogin(driver: any, password: string) {
+    if (!driver.isActive) {
+      throw new UnauthorizedException('Driver account is deactivated');
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, driver.password);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    if (driver.company && !driver.company.isActive) {
+      throw new UnauthorizedException('Company is deactivated');
+    }
+
+    const { password: _, ...driverWithoutPassword } = driver;
+    const token = await this.generateToken({
+      id: driver.id,
+      email: driver.email,
+      role: UserRole.DRIVER,
+      companyId: driver.companyId,
+      userType: 'driver',
+    });
+
+    return {
+      user: driverWithoutPassword,
+      token,
+      userType: 'driver',
     };
   }
 
   async validateUser(email: string, password: string) {
+    // Проверяем в обеих таблицах
     const user = await this.prisma.user.findUnique({
       where: { email },
     });
 
     if (user && await bcrypt.compare(password, user.password)) {
       const { password: _, ...result } = user;
-      return result;
+      return { ...result, userType: 'user' };
+    }
+
+    const driver = await this.prisma.driver.findUnique({
+      where: { email },
+    });
+
+    if (driver && await bcrypt.compare(password, driver.password)) {
+      const { password: _, ...result } = driver;
+      return { ...result, userType: 'driver', role: UserRole.DRIVER };
     }
 
     return null;
   }
 
-  private async generateToken(user: any) {
-    const payload = {
-      sub: user.id,
-      email: user.email,
-      role: user.role,
-      companyId: user.companyId,
+  private async generateToken(payload: any) {
+    // Убеждаемся, что payload содержит все необходимые поля
+    const tokenPayload = {
+      sub: payload.id,        // user/driver ID
+      email: payload.email,
+      role: payload.role,
+      companyId: payload.companyId || null,
+      userType: payload.userType,
     };
 
-    return this.jwtService.sign(payload);
+    console.log('Generating token with payload:', tokenPayload); // Временный лог для отладки
+
+    return this.jwtService.sign(tokenPayload);
   }
 
-  async getProfile(userId: string) {
+  async getProfile(userId: string, userType: string = 'user') {
+    if (userType === 'driver') {
+      const driver = await this.prisma.driver.findUnique({
+        where: { id: userId },
+        include: { 
+          company: true,
+          _count: {
+            select: {
+              contracts: true,
+              payments: true,
+            },
+          },
+        },
+      });
+
+      if (!driver) {
+        throw new UnauthorizedException('Driver not found');
+      }
+
+      const { password: _, ...driverWithoutPassword } = driver;
+      return { ...driverWithoutPassword, userType: 'driver', role: UserRole.DRIVER };
+    }
+
+    // Существующий код для User
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: { company: true },
@@ -158,6 +250,6 @@ export class AuthService {
     }
 
     const { password: _, ...userWithoutPassword } = user;
-    return userWithoutPassword;
+    return { ...userWithoutPassword, userType: 'user' };
   }
 }
