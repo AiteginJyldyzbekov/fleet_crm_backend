@@ -14,6 +14,7 @@ import { DriverService } from './driver.service';
 import { CreateDriverDto } from './dto/create-driver.dto';
 import { UpdateDriverDto } from './dto/update-driver.dto';
 import { UpdateBalanceDto } from './dto/update-balance.dto';
+import { UpdateDepositDto } from './dto/update-deposit.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { User, CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserRole } from '@prisma/client';
@@ -92,6 +93,16 @@ export class DriverController {
     @User() user: CurrentUser,
   ) {
     return this.driverService.updateBalance(id, updateBalanceDto, user);
+  }
+
+  @Roles(UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN)
+  @Patch(':id/deposit')
+  updateDeposit(
+    @Param('id') id: string,
+    @Body() updateDepositDto: UpdateDepositDto,
+    @User() user: CurrentUser,
+  ) {
+    return this.driverService.updateDeposit(id, updateDepositDto, user);
   }
 
   @Roles(UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN)

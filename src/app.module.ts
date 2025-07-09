@@ -6,7 +6,8 @@ import { PrismaModule } from './prisma/prisma.module';
 import { CompanyModule } from './company/company.module';
 import { AuthModule } from './auth/auth.module';
 import { DriverModule } from './driver/driver.module';
-import { VehicleModule } from './vehicle/vehicle.module'; // Новый модуль
+import { VehicleModule } from './vehicle/vehicle.module';
+import { ContractModule } from './contract/contract.module'; // Новый модуль
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 
@@ -21,7 +22,8 @@ import { RolesGuard } from './auth/guards/roles.guard';
     AuthModule,
     CompanyModule,
     DriverModule,
-    VehicleModule, 
+    VehicleModule,
+    ContractModule, // Добавляем Contract модуль
   ],
   controllers: [],
   providers: [

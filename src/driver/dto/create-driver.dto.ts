@@ -1,6 +1,5 @@
-import { IsEmail, IsString, MinLength, IsOptional, IsDecimal } from 'class-validator';
-import { Transform } from 'class-transformer';
-import { Type } from 'class-transformer';
+import { IsEmail, IsString, MinLength, IsOptional, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 
 export class CreateDriverDto {
   @IsEmail()
@@ -27,9 +26,16 @@ export class CreateDriverDto {
   @IsOptional()
   @Transform(({ value }) => parseFloat(value))
   @Type(() => Number)
+  @Min(0)
   balance?: number = 0;
 
   @IsOptional()
+  @Transform(({ value }) => parseFloat(value))
+  @Type(() => Number)
+  @Min(0)
+  deposit?: number = 0;
+
+  @IsOptional()
   @IsString()
-  companyId?: string; // Будет автоматически установлен для Company Admin
+  companyId?: string;
 }

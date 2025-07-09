@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateDriverDto } from './dto/create-driver.dto';
 import { UpdateDriverDto } from './dto/update-driver.dto';
 import { UpdateBalanceDto } from './dto/update-balance.dto';
+import { UpdateDepositDto } from './dto/update-deposit.dto';
 import { UserRole, PaymentType } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
@@ -17,7 +18,7 @@ export class DriverService {
   constructor(private prisma: PrismaService) {}
 
   async create(createDriverDto: CreateDriverDto, currentUser: any) {
-    const { email, password, firstName, lastName, phone, licenseNumber, balance, companyId } = createDriverDto;
+    const { email, password, firstName, lastName, phone, licenseNumber, balance, deposit, companyId } = createDriverDto;
 
     // Определяем companyId в зависимости от роли пользователя
     let targetCompanyId: string;
@@ -80,7 +81,8 @@ export class DriverService {
           phone,
           licenseNumber,
           balance: balance || 0,
-          companyId: targetCompanyId, // Теперь всегда string, а не undefined
+          deposit: deposit || 0,
+          companyId: targetCompanyId,
         },
         include: {
           company: {
@@ -300,6 +302,70 @@ export class DriverService {
     });
   }
 
+  async updateDeposit(id: string, updateDepositDto: UpdateDepositDto, currentUser: any) {
+    const { amount, operation, reason } = updateDepositDto;
+
+    const driver = await this.prisma.driver.findUnique({
+      where: { id },
+    });
+
+    if (!driver) {
+      throw new NotFoundException(`Driver with ID ${id} not found`);
+    }
+
+    // Проверка доступа
+    this.checkDriverAccess(driver, currentUser);
+
+    let newDepositBalance: number;
+    let paymentType: PaymentType;
+    let description: string;
+
+    if (operation === 'add') {
+      newDepositBalance = Number(driver.deposit) + amount;
+      paymentType = PaymentType.PAYMENT;
+      description = reason || `Deposit top-up: +${amount}`;
+    } else {
+      newDepositBalance = Number(driver.deposit) - amount;
+      if (newDepositBalance < 0) {
+        throw new BadRequestException('Insufficient deposit balance');
+      }
+      paymentType = PaymentType.FINE;
+      description = reason || `Deposit deduction: -${amount}`;
+    }
+
+    // Выполняем транзакцию
+    return this.prisma.$transaction(async (tx) => {
+      // Обновляем депозит водителя
+      const updatedDriver = await tx.driver.update({
+        where: { id },
+        data: { deposit: newDepositBalance },
+        include: {
+          company: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+      });
+
+      // Создаем запись о движении депозита
+      await tx.payment.create({
+        data: {
+          amount,
+          type: paymentType,
+          description,
+          driverId: id,
+          companyId: driver.companyId,
+          createdById: currentUser.id,
+        },
+      });
+
+      return updatedDriver;
+    });
+  }
+
   async getDriverStats(id: string, currentUser: any) {
     const driver = await this.findOne(id, currentUser);
 
@@ -337,6 +403,7 @@ export class DriverService {
       driver,
       stats: {
         currentBalance: driver.balance,
+        currentDeposit: driver.deposit,
         totalPayments: totalPayments._sum.amount || 0,
         totalFines: totalFines._sum.amount || 0,
         totalRentPaid: totalRentPaid._sum.amount || 0,
