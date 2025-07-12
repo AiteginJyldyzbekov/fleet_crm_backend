@@ -10,6 +10,8 @@ import { VehicleModule } from './vehicle/vehicle.module';
 import { ContractModule } from './contract/contract.module'; // Новый модуль
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { BillingModule } from './billing/billing.module';
 
 @Module({
   imports: [
@@ -18,12 +20,14 @@ import { RolesGuard } from './auth/guards/roles.guard';
       envFilePath: '.env',
     }),
     ScheduleModule.forRoot(),
+    EventEmitterModule.forRoot(),
     PrismaModule,
     AuthModule,
     CompanyModule,
     DriverModule,
     VehicleModule,
-    ContractModule, // Добавляем Contract модуль
+    ContractModule,
+    BillingModule,
   ],
   controllers: [],
   providers: [
@@ -37,4 +41,4 @@ import { RolesGuard } from './auth/guards/roles.guard';
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }
