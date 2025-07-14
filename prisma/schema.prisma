@@ -8,7 +8,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
 // Основная модель компании (tenant)
 model Company {
   id        String   @id @default(cuid())
@@ -27,6 +26,10 @@ model Company {
   contracts    Contract[]
   payments     Payment[]
   subscription Subscription?
+  
+  // Новые связи для аналитики
+  expenses     Expense[]
+  analytics    Analytics[]
 
   @@map("companies")
 }
@@ -69,6 +72,12 @@ model Driver {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  // Новые поля для аналитики
+  totalContracts    Int       @default(0)
+  totalRevenue      Float     @default(0)
+  averageRating     Float?    @default(5.0)
+  lastActivityDate  DateTime?
+
   // Multi-tenant связь
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -94,12 +103,19 @@ model Vehicle {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
+  // Новые поля для аналитики
+  purchasePrice       Float?
+  purchaseDate        DateTime?
+  lastMaintenanceDate DateTime?
+  totalMileage        Int?      @default(0)
+
   // Multi-tenant связь
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   // Связи
   contracts Contract[]
+  expenses  Expense[]
 
   @@unique([plateNumber, companyId])
   @@map("vehicles")
@@ -117,6 +133,12 @@ model Contract {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
+  // Новые поля для аналитики
+  actualDuration    Int?    // Фактическое количество дней
+  totalRevenue      Float   @default(0)
+  expectedRevenue   Float   @default(0)
+  utilizationRate   Float?  // Процент использования
+
   // Multi-tenant связь
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -132,6 +154,7 @@ model Contract {
 
   @@map("contracts")  
 }
+
 // Модель платежей
 model Payment {
   id          String      @id @default(cuid())
@@ -141,6 +164,9 @@ model Payment {
   date        DateTime    @default(now())
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
+
+  // Новое поле для аналитики
+  metadata    Json?       // Дополнительная информация для аналитики
 
   // Multi-tenant связь
   companyId String
@@ -157,6 +183,48 @@ model Payment {
   createdBy   User?   @relation("PaymentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@map("payments")
+}
+
+// Новая модель для расходов АВТОПАРКА
+model Expense {
+  id          String      @id @default(cuid())
+  companyId   String      // Мульти-тенантность
+  type        ExpenseType
+  category    String      // "Замена масла", "Ремонт двигателя", "ОСАГО", "Прочие расходы"
+  amount      Float
+  description String?
+  vehicleId   String?     // Если расход связан с конкретным авто
+  date        DateTime    @default(now())
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  
+  // Кто покрывает расход
+  paidBy      ExpensePayer @default(COMPANY)  // Кто фактически платит
+  
+  // Связи
+  company     Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  vehicle     Vehicle?    @relation(fields: [vehicleId], references: [id])
+
+  @@map("expenses")
+}
+
+// Таблица для кэширования аналитических метрик
+model Analytics {
+  id              String          @id @default(cuid())
+  companyId       String
+  metricType      AnalyticsType   
+  date            DateTime        // Дата для которой рассчитана метрика
+  entityId        String?         // vehicleId или driverId для конкретных метрик
+  value           Float           // Значение метрики
+  metadata        Json?           // Дополнительные данные (JSON)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // Связи
+  company         Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, metricType, date, entityId])
+  @@map("analytics")
 }
 
 // Модель подписки (для Phase 2)
@@ -177,7 +245,7 @@ model Subscription {
   @@map("subscriptions")
 }
 
-// Энумы
+// Существующие энумы
 enum UserRole {
   SUPER_ADMIN
   COMPANY_ADMIN
@@ -218,4 +286,26 @@ enum SubscriptionStatus {
   ACTIVE
   EXPIRED
   CANCELLED
+}
+
+// Новые enum типы для аналитики
+enum ExpenseType {
+  MAINTENANCE         // Плановое ТО 
+  REPAIR             // Ремонт (когда платит автопарк)
+  INSURANCE          // Страхование
+  OTHER              // Прочие расходы компании
+}
+
+enum ExpensePayer {
+  COMPANY            // Платит автопарк
+  DRIVER             // Платит водитель (не учитываем в расходах)
+}
+
+enum AnalyticsType {
+  DAILY_REVENUE
+  MONTHLY_REVENUE
+  VEHICLE_UTILIZATION
+  DRIVER_KPI
+  FLEET_EFFICIENCY
+  EXPENSE_SUMMARY
 }
